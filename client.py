@@ -9,7 +9,7 @@ from datetime import *
 import time
 
 
-SERVER_PORT = 1067
+SERVER_PORT = 67
 initial_interval = 10
 backoff_cutoff = 120
 

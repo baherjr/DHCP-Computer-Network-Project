@@ -8,8 +8,8 @@ from datetime import *
 import time
 
 
-SERVER_PORT = 1067
-SERVER_IP = "192.168.100.1"
+SERVER_PORT = 67
+SERVER_IP = "192.168.1.107"
 
 serverSocket = None
 ip_range_start = ""
@@ -244,6 +244,5 @@ if __name__ == "__main__":
         serverSocket = server
         while True:
             data, addr = server.recvfrom(4096)
-            if addr != ('0.0.0.0', 68):
-                newThread = threading.Thread(target=clientThread, args=(addr, data))
-                newThread.start()
+            newThread = threading.Thread(target=clientThread, args=(addr, data))
+            newThread.start()
