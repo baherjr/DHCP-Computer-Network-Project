@@ -3,7 +3,7 @@ import binascii
 
 # Server configuration
 SERVER_PORT = 67  # Port for the DHCP server
-BROADCAST_ADDRESS = "<broadcast>"  # Broadcast address to deliver responses
+BROADCAST_ADDRESS = "255.255.255.255"
 
 
 def main():
