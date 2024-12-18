@@ -9,7 +9,7 @@ import time
 
 
 SERVER_PORT = 67
-SERVER_IP = "192.168.1.107"
+SERVER_IP = "192.168.100.6"
 
 serverSocket = None
 ip_range_start = ""
@@ -109,6 +109,7 @@ def dhcpOffer(address, packet, offer_ip):
     print("Sending DHCP offer to: " + packet.macAddress)
     offerPacket = DHCPPacket()
     offerPacket.setMessage(type="02", transactionID=packet.xid, client_mac_address=packet.macAddress, client_ip_address=offer_ip, server_ip_address=SERVER_IP, lease_time=lease_time)
+    print("Packet to be sent: " + json.dumps(offerPacket.__dict__, indent=4))
     serverSocket.sendto(unhexlify(offerPacket.sendMessage), address)
 
 
@@ -233,6 +234,7 @@ if __name__ == "__main__":
     print("Server is listening")
     print("*" * 25)
 
+    # Keeping the TimerThread and StatusThread as they are
     statusT = threading.Thread(target=statusThread)
     timeT = threading.Thread(target=timerThread)
     statusT.start()
@@ -242,7 +244,8 @@ if __name__ == "__main__":
         server.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
         server.bind(('', SERVER_PORT))
         serverSocket = server
+
         while True:
             data, addr = server.recvfrom(4096)
-            newThread = threading.Thread(target=clientThread, args=(addr, data))
-            newThread.start()
+
+            clientThread(addr, data)

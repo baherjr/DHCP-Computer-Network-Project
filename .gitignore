@@ -4,4 +4,4 @@
 # IntelliJ project files
 .idea
 *.iml
-*.json
+configs.json

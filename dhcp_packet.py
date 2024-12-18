@@ -1,188 +1,142 @@
+
+
 class DHCPPacket:
     def __init__(self):
-        self.type = 0
-        self.xid = []
-        self.macAddress = ""
-        self.yiaddr = ""
-        self.siaddr = ""
-        self.hostname = ""
-        self.lease_time = 0
-        self.sendMessage = ""
-        self.decoded = ""
+        # DHCP packet structure
+        self.type = 0  # DHCP message type
+        self.xid = []  # Transaction ID
+        self.macAddress = ""  # Client MAC address
+        self.yiaddr = ""  # Client IP address (offered)
+        self.siaddr = ""  # Server IP address
+        self.hostname = ""  # Client hostname
+        self.lease_time = 0  # Lease time in seconds
+        self.sendMessage = ""  # Full packet in hex for sending
+        self.decoded = ""  # Human-readable decoded packet
 
-    # Type:
-    # Discover = 01
-    # Offer = 02 For Server
-    # Request = 03
-    # Ack = 04 For Server
-    def setMessage(self, type, transactionID, client_mac_address, elapsed_ime=0, client_ip_address="0.0.0.0", server_ip_address="0.0.0.0", host_name="", lease_time=0):
-        if type == "01" or type == "03":
-            OP = "01"
-        else:
-            OP = "02"
-        HTYPE = "01"
-        HLEN = "06"
-        HOPS = "00"
-        XID = ""
-        for i in transactionID:
-            XID += i
-        if elapsed_ime == 0:
-            SECS = "00" * 2
-        else:
-            SECS = "{:04x}".format(int(elapsed_ime))
-        FLAGS = "00" * 2
-        CIADDR = "00" * 4
-        YIADDR = ""
-        for i in client_ip_address.split("."):
-            YIADDR += "{:02x}".format(int(i))
-        SIADDR = ""
-        for i in server_ip_address.split("."):
-            SIADDR += "{:02x}".format(int(i))
-        GIADDR = "00" * 4
-        CHADDR = ""
-        for i in client_mac_address.split(":"):
-            CHADDR += i
-        for i in range(10):
-            CHADDR += "{:02x}".format(0)
-        SNAME = "00" * 64
-        FILE = "00" * 128
-        MAGICCOOKIE = ""  # DHCP
-        for i in ["63", "82", "53", "63"]:
-            MAGICCOOKIE += i
-        OPTION1 = ""  # Message Type
-        for i in ["35", "01", type]:
-            OPTION1 += i
-        OPTION2 = ""
-        if host_name != "":
-            OPTION2 = "0c"
-            OPTION2 += "{:02x}".format(len(host_name))
-            for i in host_name:
-                OPTION2 += "{:02x}".format(ord(i))
-        elif lease_time != 0:
-            OPTION2 = "33"
-            OPTION2 += "04"
-            lease_time_str = hex(lease_time).split('x')[-1]
-            for i in range(0, 8 - len(lease_time_str)):
-                OPTION2 += "0"
-            OPTION2 += lease_time_str
+    def setMessage(
+            self,
+            type,
+            transactionID,
+            client_mac_address,
+            elapsed_time=0,
+            client_ip_address="0.0.0.0",
+            server_ip_address="0.0.0.0",
+            host_name="",
+            lease_time=0,
+    ):
+        """
+        Constructs the DHCP packet as a hex string based on provided fields.
+        """
+        try:
+            # DHCP header fields
+            OP = "02" if type in ["02", "05"] else "01"  # Response (2) or Request (1)
+            HTYPE = "01"  # Ethernet
+            HLEN = "06"  # MAC length
+            HOPS = "00"  # No relay
+            XID = "".join(transactionID)  # Transaction ID
+            SECS = f"{elapsed_time:04x}" if elapsed_time else "00" * 2  # Elapsed time
+            FLAGS = "00" * 2  # No special flags
+            CIADDR = "00" * 4  # Client address placeholder
+            YIADDR = "".join([f"{int(octet):02x}" for octet in client_ip_address.split(".")])
+            SIADDR = "".join([f"{int(octet):02x}" for octet in server_ip_address.split(".")])
+            GIADDR = "00" * 4  # Gateway IP
+            CHADDR = "".join([f"{int(octet, 16):02x}" for octet in client_mac_address.split(":")])
+            CHADDR += "00" * 10  # Padding to 16 bytes
+            SNAME = "00" * 64  # Next server placeholder
+            FILE = "00" * 128  # Boot filename placeholder
 
-        END = "ff"  # End of Options
+            # DHCP options
+            MAGICCOOKIE = "63825363"  # DHCP magic cookie
 
-        packet = ""
-        packet += OP
-        packet += HTYPE
-        packet += HLEN
-        packet += HOPS
-        packet += XID
-        packet += SECS
-        packet += FLAGS
-        packet += CIADDR
-        packet += YIADDR
-        packet += SIADDR
-        packet += GIADDR
-        packet += CHADDR
-        packet += SNAME
-        packet += FILE
-        packet += MAGICCOOKIE
-        packet += OPTION1
-        packet += OPTION2
-        packet += END
+            # Mandatory options
+            OPTION1 = f"35{len(type):02x}{type}"  # Message type option
+            OPTION2 = ""
 
-        self.sendMessage = packet
+            if lease_time > 0:
+                OPTION2 += "3304" + f"{lease_time:08x}"
+
+            if host_name:
+                OPTION2 += f"0c{len(host_name):02x}" + "".join(f"{ord(c):02x}" for c in host_name)
+
+            END = "ff"  # End of options
+
+            # Finalize packet
+            packet = (
+                    OP
+                    + HTYPE
+                    + HLEN
+                    + HOPS
+                    + XID
+                    + SECS
+                    + FLAGS
+                    + CIADDR
+                    + YIADDR
+                    + SIADDR
+                    + GIADDR
+                    + CHADDR
+                    + SNAME
+                    + FILE
+                    + MAGICCOOKIE
+                    + OPTION1
+                    + OPTION2
+                    + END
+            )
+
+            self.sendMessage = packet
+
+        except Exception as e:
+            print(f"Error constructing DHCP packet: {e}")
+            raise
 
     def decodePacket(self, data):
-        message = ""
+        """
+        Decodes a raw DHCP packet (hex string) into human-readable fields.
+        """
+        try:
+            message = ""
 
-        OP = data[0:2]
-        HTYPE = data[2:4]
-        HLEN = data[4:6]
-        HOPS = data[6:8]
-        XID = data[8:16]
-        SECS = data[16:20]
-        FLAGS = data[20:24]
-        CIADDR = data[24:32]
-        YIADDR = data[32:40]
-        SIADDR = data[40:48]
-        GIADDR = data[48:56]
-        CHADDR = data[56:88]
-        SNAME = data[88:216]
-        FILE = data[216:472]
-        MAGICCOOCKIE = data[472:480]
-        OPTION1 = data[480:486]
-        option2_len = 0
-        OPTION2 = ""
-        if data[486:488] != "ff":
-            option2_len = int(data[488:490], 16)
-            OPTION2 = data[486:486 + 4 + option2_len * 2]
+            # Header fields
+            self.type = int(data[480:482], 16)
+            self.xid = [data[8:10], data[10:12], data[12:14], data[14:16]]
+            self.yiaddr = ".".join([str(int(data[32:40][i: i + 2], 16)) for i in range(0, 8, 2)])
+            self.siaddr = ".".join([str(int(data[40:48][i: i + 2], 16)) for i in range(0, 8, 2)])
+            self.macAddress = ":".join([data[56:68][i: i + 2] for i in range(0, 12, 2)])
 
-        message += "OP: "
-        message += OP
-        message += "\nHTYPE: "
-        message += HTYPE
-        message += "\nHLEN: "
-        message += HLEN
-        message += "\nHOPS: "
-        message += HOPS
-        message += "\nXID: "
-        message += XID
-        message += "\nSECS: "
-        message += SECS
-        message += "\nFLAGS: "
-        message += FLAGS
-        message += "\nCIADDR: "
-        message += CIADDR
-        message += "\nYIADDR: "
-        message += YIADDR
-        message += "\nSIADDR: "
-        message += SIADDR
-        message += "\nGIADDR: "
-        message += GIADDR
-        message += "\nCHADDR: "
-        message += CHADDR
-        message += "\nSNAME: "
-        message += SNAME
-        message += "\nFILE: "
-        message += FILE
-        message += "\nMAGIC-COOCKIE: "
-        message += MAGICCOOCKIE
-        message += "\nOPTION1: "
-        message += OPTION1
-        message += "\nOPTION2: "
-        message += OPTION2
-        message += "\n"
+            # Options
+            options = data[472:]
+            message += f"Type: {self.type}\n"
+            position = 0
 
-        # XID
-        for i in range(4):
-            self.xid.append(XID[i * 2:i * 2 + 2])
-        # Client IP
-        for i in range(4):
-            self.yiaddr += YIADDR[i * 2:i * 2 + 2]
-            if i != 3:
-                self.yiaddr += "."
-        # Server IP
-        for i in range(4):
-            self.siaddr += SIADDR[i * 2:i * 2 + 2]
-            if i != 3:
-                self.siaddr += "."
-        # DHCP message type
-        self.type = int(OPTION1[4:], 16)
-        # Client MAC address
-        for i in range(6):
-            self.macAddress += CHADDR[i * 2:i * 2 + 2]
-            if i != 5:
-                self.macAddress += ":"
-        # Hostname
-        if OPTION2[0:2] == "33":
-            lease_time_str = ""
-            for i in range(0, option2_len):
-                lease_time_str += OPTION2[4 + (i * 2):6 + (i * 2)]
-            self.lease_time = int(lease_time_str, 16)
-        elif OPTION2[0:2] == "0c":
-            for i in range(0, option2_len):
-                self.hostname += chr(int(OPTION2[4 + (i * 2): 6 + (i * 2)], 16))
-            # Decoded packet
-        self.decoded = message
+            while position < len(options):
+                option_type = options[position: position + 2]
+                if option_type == "ff":
+                    break
+                option_length = int(options[position + 2: position + 4], 16)
+                option_data = options[position + 4: position + 4 + option_length * 2]
+
+                if option_type == "33":  # Lease time
+                    self.lease_time = int(option_data, 16)
+                elif option_type == "0c":  # Hostname
+                    self.hostname = bytearray.fromhex(option_data).decode()
+                position += 4 + option_length * 2
+
+            self.decoded = message
+
+        except Exception as e:
+            print(f"Error decoding DHCP packet: {e}")
+            raise
 
 
-if __name__ == '__main__':
-    pass
+if __name__ == "__main__":
+    packet = DHCPPacket()
+    packet.setMessage(
+        type="02",
+        transactionID=["12", "34", "56", "78"],
+        client_mac_address="86:6b:d0:76:c7:b4",
+        client_ip_address="192.168.100.2",
+        server_ip_address="192.168.100.1",
+        host_name="Client-1",
+        lease_time=3600,
+    )
+
+    print(f"Packet to be sent: {packet.sendMessage}")

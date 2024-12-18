@@ -4,7 +4,7 @@ import binascii
 
 # Server Configuration
 SERVER_PORT = 67  # Port for the DHCP server
-BROADCAST_ADDRESS = "255.255.255.255"
+BROADCAST_ADDRESS = "255.255.255.0"  # Corrected broadcast address
 
 # Error Codes
 ERROR_CODES = {
@@ -19,16 +19,23 @@ ERROR_CODES = {
 def create_socket():
     """Create and configure the UDP socket."""
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-    server_socket.bind(('', SERVER_PORT))  # Bind to all interfaces on port 67
+
+    # Bind to all interfaces on the desired port
+    server_socket.bind(("0.0.0.0", SERVER_PORT))
     return server_socket
 
 
 def parse_dhcp_packet(data):
     """Parse a raw DHCP packet and convert it into structured fields."""
     try:
-        # DHCP packet structure (fixed-size part)
-        packet = struct.unpack("!BBBB4sHHHH4s4s4s4s16s64s128s", data[:240])
+        if len(data) < 240:
+            print("Received packet is too small to be a valid DHCP packet.")
+            return None
+
+        # Unpack the fixed-length part of the DHCP packet
+        packet = struct.unpack("!BBBB4sHHI4s4s4s4s16s64s128s", data[:240])
         dhcp_packet = {
             "op": packet[0],  # Message type: BOOTREQUEST (1) or BOOTREPLY (2)
             "htype": packet[1],  # Hardware type
@@ -37,13 +44,14 @@ def parse_dhcp_packet(data):
             "xid": packet[4],  # Transaction ID
             "secs": packet[5],  # Seconds elapsed
             "flags": packet[6],  # Flags
-            "ciaddr": socket.inet_ntoa(packet[7].to_bytes(4, "big")),  # Client IP Address
-            "yiaddr": socket.inet_ntoa(packet[8].to_bytes(4, "big")),  # 'Your' IP Address
-            "siaddr": socket.inet_ntoa(packet[9].to_bytes(4, "big")),  # Server IP Address
-            "giaddr": socket.inet_ntoa(packet[10].to_bytes(4, "big")),  # Gateway IP Address
+            # Convert integers to bytes for inet_ntoa
+            "ciaddr": socket.inet_ntoa(struct.pack('!I', packet[7])),
+            "yiaddr": socket.inet_ntoa(struct.pack('!I', packet[8])),
+            "siaddr": socket.inet_ntoa(struct.pack('!I', packet[9])),
+            "giaddr": socket.inet_ntoa(struct.pack('!I', packet[10])),
             "chaddr": binascii.hexlify(packet[11][:packet[2]]).decode(),  # Client MAC Address
-            "sname": packet[12].decode().strip("\x00"),  # Server Host Name
-            "file": packet[13].decode().strip("\x00"),  # Boot Filename
+            "sname": packet[12].decode(errors="ignore").strip("\x00"),  # Server Host Name
+            "file": packet[13].decode(errors="ignore").strip("\x00"),  # Boot Filename
             "magic_cookie": binascii.hexlify(data[236:240]).decode(),
         }
         # Parse DHCP options (remaining part of data)
@@ -103,26 +111,26 @@ def get_dhcp_message_type(options):
 
 def send_dhcp_offer(parsed_packet, server_socket, client_address):
     """Send a DHCPOFFER response to the client."""
-    # Simplified offer packet construction
     response_packet = construct_dhcp_packet(
         transaction_id=parsed_packet["xid"],
-        yiaddr="192.168.1.100",  # Example assigned IP address
-        siaddr="192.168.1.1",  # DHCP server address
+        yiaddr="192.168.100.6",  # Example assigned IP address
+        siaddr="192.168.100.1",  # DHCP server address
         dhcp_message_type=2,  # DHCPOFFER
     )
-    server_socket.sendto(response_packet, (BROADCAST_ADDRESS, 68))  # Send to broadcast port 68
+    # Send the response directly to the client's address instead of broadcasting
+    server_socket.sendto(response_packet, client_address)
     print(f"DHCPOFFER sent to {client_address} with IP 192.168.1.100")
 
 
 def send_dhcp_ack(parsed_packet, server_socket, client_address):
     """Send a DHCPACK response to the client."""
-    # Simplified ACK packet construction
     response_packet = construct_dhcp_packet(
         transaction_id=parsed_packet["xid"],
-        yiaddr="192.168.1.100",  # Confirmed IP address
-        siaddr="192.168.1.1",  # DHCP server address
+        yiaddr="192.168.100.6",  # Example assigned IP address
+        siaddr="192.168.100.1",  # DHCP server address
         dhcp_message_type=5,  # DHCPACK
     )
+    # Send the response directly to the client's address
     server_socket.sendto(response_packet, client_address)
     print(f"DHCPACK sent to {client_address} confirming IP 192.168.1.100")
 
@@ -167,6 +175,10 @@ def main():
         try:
             # Wait for inbound DHCP messages
             data, client_address = server_socket.recvfrom(1024)
+            # In the main server loop
+            if client_address == ('0.0.0.0', 68):
+                print("Warning: Received packet from invalid address ('0.0.0.0', 68).")
+
             print(f"Received message from {client_address}")
             handle_dhcp_message(data, server_socket, client_address)
 
