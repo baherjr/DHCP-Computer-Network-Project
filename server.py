@@ -9,7 +9,7 @@ import time
 
 
 SERVER_PORT = 67
-SERVER_IP = "192.168.100.6"
+SERVER_IP = "192.168.1.1"
 
 serverSocket = None
 ip_range_start = ""
@@ -22,7 +22,7 @@ accepted_clients = []
 
 
 def readConfigs():
-    with open("./configs.json") as file:
+    with open("F:/ASU/YEAR 4/Semester 1/CSE351 - Networks/Project/Networks/configs.json") as file:
         global ip_range_start
         global ip_range_finish
         global ip_pool
