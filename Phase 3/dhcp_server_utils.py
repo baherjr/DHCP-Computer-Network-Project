@@ -172,36 +172,32 @@ def parse_dhcp_options(options_data):
 
 
 
-def handle_dhcp_message(packet, server_socket, client_address):
+def handle_dhcp_message(packet, server_socket, client_address, ip_manager):
     """Handle a DHCP message based on its type and current state."""
     try:
         # Parse the packet
         parsed_packet = parse_dhcp_packet(packet)
-        print("entered handling")
+
         if not parsed_packet:
-            send_error_response(client_address, server_socket, "MALFORMED_PACKET")
+            print("[WARNING] Failed to parse DHCP packet. Ignoring.")
             return
 
         # Identify the type of DHCP message
         dhcp_message_type = get_dhcp_message_type(parsed_packet["options"])
 
         if dhcp_message_type == 1:  # DHCPDISCOVER
-            print(f"DHCPDISCOVER received from {client_address}")
-            send_dhcp_offer(parsed_packet, server_socket, client_address)
+            print(f"[INFO] DHCPDISCOVER received from {client_address}")
+            send_dhcp_offer(parsed_packet, server_socket, client_address, ip_manager)
 
         elif dhcp_message_type == 3:  # DHCPREQUEST
-            print(f"DHCPREQUEST received from {client_address}")
-            send_dhcp_ack(parsed_packet, server_socket, client_address)
+            print(f"[INFO] DHCPREQUEST received from {client_address}")
+            send_dhcp_ack(parsed_packet, server_socket, client_address, ip_manager)
 
         else:
-            # If the message type is not supported, send an error
-            print(f"Unsupported DHCP message type: {dhcp_message_type}")
-            send_error_response(client_address, server_socket, "UNSUPPORTED_MESSAGE")
+            print(f"[WARNING] Unsupported DHCP message type: {dhcp_message_type}")
 
     except Exception as e:
-        print(f"Error processing DHCP message: {e}")
-        send_error_response(client_address, server_socket, "GENERAL_FAILURE")
-
+        print(f"[ERROR] Error processing DHCP message: {e}")
 
 def get_dhcp_message_type(options):
     """Extract the DHCP message type from the structured options field."""
@@ -215,17 +211,36 @@ def get_dhcp_message_type(options):
         return None
 
 
-def send_dhcp_offer(parsed_packet, server_socket, client_address):
+def send_dhcp_offer(parsed_packet, server_socket, client_address, ip_manager):
     """Send a DHCPOFFER response to the client."""
-    response_packet = construct_dhcp_packet(
-        transaction_id=parsed_packet["xid"],
-        yiaddr="192.168.100.6",  # Example assigned IP address
-        siaddr="192.168.100.1",  # DHCP server address
-        dhcp_message_type=2,  # DHCPOFFER
-    )
-    # Send the response directly to the client's address instead of broadcasting
-    server_socket.sendto(response_packet, client_address)
-    print(f"DHCPOFFER sent to {client_address} with IP 192.168.1.100")
+    try:
+        # Extract the client MAC address from the parsed packet
+        client_mac = parsed_packet["chaddr"]
+        print(f"[INFO] Processing DHCPDISCOVER for MAC: {client_mac}")
+
+        # Get the next available IP address from IPManager
+        offered_ip = ip_manager.get_next_available_ip(client_mac)
+
+        if not offered_ip:
+            print(f"[WARNING] No IP available for MAC {client_mac}. Cannot send DHCPOFFER.")
+            return
+
+        # Create the DHCPOFFER packet using the assigned IP
+        response_packet = construct_dhcp_packet(
+            transaction_id=parsed_packet["xid"],
+            yiaddr=offered_ip,  # Offered IP address
+            siaddr="192.168.100.1",  # Server IP address (example value)
+            dhcp_message_type=2,  # DHCPOFFER
+        )
+
+        # Send the response directly to the client's address
+        server_socket.sendto(response_packet, client_address)
+
+        # Log success and record the lease
+        print(f"[INFO] DHCPOFFER sent to {client_address} with IP {offered_ip}")
+        ip_manager.add_lease(offered_ip, client_mac, lease_time=3600)  # Example: 1 hour lease
+    except Exception as e:
+        print(f"[ERROR] Failed to send DHCPOFFER: {e}")
 
 
 def send_dhcp_ack(parsed_packet, server_socket, client_address):
@@ -286,25 +301,28 @@ def send_error_response(client_address, server_socket, error_code):
 
 def main():
     """Main entry point for the server."""
+    # Initialize the IPManager with a sample config file path
+    ip_manager = IPManager(config_path="dhcp_config.json")
+
+    # Create and set up the server socket
     server_socket = create_socket()
-    print(f"DHCP server is running on port {SERVER_PORT}")
+    print(f"[INFO] DHCP server is running on port {SERVER_PORT}")
 
     while True:
         try:
             # Wait for inbound DHCP messages
             data, client_address = server_socket.recvfrom(1024)
-            # In the main server loop
-            if client_address != ('0.0.0.0', 68):
-                print("Warning: Received packet from invalid address ('0.0.0.0', 68).")
 
-            print(f"Received message from {client_address}")
-            handle_dhcp_message(data, server_socket, client_address)
+            # Log the received message
+            print(f"[INFO] Received message from {client_address}")
+
+            # Process the DHCP message
+            handle_dhcp_message(data, server_socket, client_address, ip_manager)
 
         except OSError as e:
-            print(f"Socket error occurred: {e}")
+            print(f"[ERROR] Socket error occurred: {e}")
         except Exception as e:
-            print(f"An unexpected error occurred: {e}")
-
+            print(f"[ERROR] An unexpected error occurred: {e}")
 
 if __name__ == "__main__":
     main()
