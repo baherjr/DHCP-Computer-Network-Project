@@ -6,7 +6,7 @@ from IPManager import IPManager
 # Server Configuration
 SERVER_PORT = 67  # Port for the DHCP server
 CLIENT_PORT = 68  # Port for the DHCP client
-BROADCAST_ADDRESS = "255.255.255.255"  # Corrected broadcast address
+BROADCAST_ADDRESS = "192.168..255"  # Corrected broadcast address
 
 # Error Codes
 ERROR_CODES = {
@@ -32,33 +32,41 @@ def create_socket():
 def parse_dhcp_packet(data):
     """Parse a raw DHCP packet and convert it into structured fields with detailed logging."""
     try:
+        print(f"Raw DHCP message (hex): {binascii.hexlify(data).decode()}")
         if len(data) < 240:
             print("Received packet is too small to be a valid DHCP packet.")
             return None
 
-        print("[DEBUG] Unpacking fixed-length DHCP fields...")
+        print("[DEBUG] Parsing fixed-length DHCP fields...")
 
-        # Unpack the fixed-length part of the DHCP packet
-        packet = struct.unpack("!BBBB4sHHI4s4s4s4s16s64s128s", data[:240])
+        # Parse fixed-length fields manually
+        op = data[0]
+        htype = data[1]
+        hlen = data[2]
+        hops = data[3]
+        xid = data[4:8]
+        secs = int.from_bytes(data[8:10], 'big')
+        flags = int.from_bytes(data[10:12], 'big')
+        ciaddr = data[12:16]  # Keep as bytes for consistency
+        yiaddr = data[16:20]
+        siaddr = data[20:24]
+        giaddr = data[24:28]
+        chaddr = data[28:28 + hlen].hex()  # Convert MAC to hex string
+        sname = data[44:108].decode('ascii').rstrip('\x00')  # Remove null bytes
+        file = data[108:236].decode('ascii').rstrip('\x00')
+        magic_cookie = data[236:240].hex()
 
-        # Debugging each field unpacked
-        print(f"[DEBUG] Message Type (op): {packet[0]}")
-        print(f"[DEBUG] Hardware Type (htype): {packet[1]}")
-        print(f"[DEBUG] Hardware Address Length (hlen): {packet[2]}")
-        print(f"[DEBUG] Hops: {packet[3]}")
-        print(f"[DEBUG] Transaction ID (xid): {binascii.hexlify(packet[4]).decode()}")
-        print(f"[DEBUG] Seconds elapsed (secs): {packet[5]}")
-        print(f"[DEBUG] Flags: {packet[6]}")
+        # Debug logging
+        print(f"[DEBUG] Message Type (op): {op}")
+        print(f"[DEBUG] Hardware Type (htype): {htype}")
+        print(f"[DEBUG] Hardware Address Length (hlen): {hlen}")
+        print(f"[DEBUG] Hops: {hops}")
+        print(f"[DEBUG] Transaction ID (xid): {binascii.hexlify(xid).decode()}")
+        print(f"[DEBUG] Seconds elapsed (secs): {secs}")
+        print(f"[DEBUG] Flags: {flags}")
 
-        # For IP addresses, they are already in packed format from struct.unpack
+        # Print IP addresses for debugging
         try:
-            # Store the packed IP addresses directly
-            ciaddr = packet[8]  # Client IP Address
-            yiaddr = packet[9]  # Your IP Address
-            siaddr = packet[10]  # Server IP Address
-            giaddr = packet[11]  # Gateway IP Address
-            
-            # Print human-readable format for debugging
             print(f"[DEBUG] Client IP Address (ciaddr): {socket.inet_ntoa(ciaddr)}")
             print(f"[DEBUG] Your IP Address (yiaddr): {socket.inet_ntoa(yiaddr)}")
             print(f"[DEBUG] Server IP Address (siaddr): {socket.inet_ntoa(siaddr)}")
@@ -67,73 +75,37 @@ def parse_dhcp_packet(data):
             print(f"[ERROR] Issue with IP addresses: {e}")
             raise
 
-        # For MAC address, ensure proper slicing of bytes
-        try:
-            chaddr = binascii.hexlify(packet[11][:packet[2]]).decode()
-        except Exception as e:
-            print(f"[ERROR] Issue decoding Client Hardware Address (chaddr): {e}")
-            raise
-
         print(f"[DEBUG] Client MAC Address (chaddr): {chaddr}")
-
-        # Ensure sname and file are decoded properly
-        try:
-            sname = packet[12].decode(errors="ignore").strip("\x00")
-            file = packet[13].decode(errors="ignore").strip("\x00")
-        except Exception as e:
-            print(f"[ERROR] Issue decoding sname/file: {e}")
-            raise
-
         print(f"[DEBUG] Server Host Name (sname): {sname}")
         print(f"[DEBUG] Boot Filename (file): {file}")
-
-        # Ensure magic cookie is valid
-        try:
-            magic_cookie = binascii.hexlify(data[236:240]).decode()
-        except Exception as e:
-            print(f"[ERROR] Issue decoding magic cookie: {e}")
-            raise
-
         print(f"[DEBUG] Magic cookie: {magic_cookie}")
 
+        # Create the packet dictionary with the same structure as before
         dhcp_packet = {
-            "op": packet[0],
-            "htype": packet[1],
-            "hlen": packet[2],
-            "hops": packet[3],
-            "xid": binascii.hexlify(packet[4]).decode(),
-            "secs": packet[5],
-            "flags": packet[6],
-            "ciaddr": ciaddr,  # Packed IP address
-            "yiaddr": yiaddr,  # Packed IP address
-            "siaddr": siaddr,  # Packed IP address
-            "giaddr": giaddr,  # Packed IP address
+            "op": op,
+            "htype": htype,
+            "hlen": hlen,
+            "hops": hops,
+            "xid": binascii.hexlify(xid).decode(),
+            "secs": secs,
+            "flags": flags,
+            "ciaddr": ciaddr,  # Keeping as packed bytes
+            "yiaddr": yiaddr,  # Keeping as packed bytes
+            "siaddr": siaddr,  # Keeping as packed bytes
+            "giaddr": giaddr,  # Keeping as packed bytes
             "chaddr": chaddr,
             "sname": sname,
             "file": file,
             "magic_cookie": magic_cookie,
         }
 
-        # Parse DHCP options
+        # Parse DHCP options manually
         print("[DEBUG] Parsing DHCP options...")
-        options = parse_dhcp_options(data[240:])
-        dhcp_packet["options"] = options
+        options = []
+        i = 240  # Start of options
 
-        return dhcp_packet
-    except Exception as e:
-        print(f"Error parsing packet: {e}")
-        raise
-
-
-def parse_dhcp_options(options_data):
-    """Parse DHCP options from the raw data with debugging."""
-    options = []
-    i = 0
-    try:
-        while i < len(options_data):
-            option_type = options_data[i]
-
-            print(f"[DEBUG] Option Type: {option_type}")
+        while i < len(data):
+            option_type = data[i]
 
             # End option (255)
             if option_type == 255:
@@ -147,29 +119,31 @@ def parse_dhcp_options(options_data):
                 i += 1
                 continue
 
-            # Other options
+            # Regular options
             else:
-                i += 1
-                if i >= len(options_data):
+                if i + 1 >= len(data):
                     print("[ERROR] Malformed DHCP options: missing length field.")
                     break
 
-                length = options_data[i]
-                i += 1
-                if i + length > len(options_data):
+                length = data[i + 1]
+                if i + 2 + length > len(data):
                     print(f"[ERROR] Malformed DHCP option: Option {option_type} exceeds data bounds.")
                     break
 
-                value = options_data[i:i + length]
+                value = data[i + 2:i + 2 + length]
                 options.append({"type": option_type, "length": length, "value": value})
-                print(f"[DEBUG] Parsed Option: {option_type}, Length: {length}, Value: {value}")
-                i += length
+                
+                # Debug output for option
+                print(f"[DEBUG] Parsed Option: {option_type}, Length: {length}, Value: {binascii.hexlify(value).decode()}")
+                
+                i += 2 + length
+
+        dhcp_packet["options"] = options
+        return dhcp_packet
 
     except Exception as e:
-        print(f"[ERROR] Exception while parsing options: {e}")
+        print(f"Error parsing packet: {e}")
         raise
-
-    return options
 
 
 
@@ -233,7 +207,7 @@ def print_dhcp_packet(packet):
     yiaddr = '.'.join(str(b) for b in packet[16:20])
     siaddr = '.'.join(str(b) for b in packet[20:24])
     giaddr = '.'.join(str(b) for b in packet[24:28])
-    chaddr = ':'.join(f'{b:02x}' for b in packet[28:34])  # First 6 bytes of chaddr (MAC address)
+    chaddr = ':'.join(f'{b:02x}' for b in packet[28:44])  # First 6 bytes of chaddr (MAC address)
     
     print(f"""
     Op Code (op):          {op} ({'BOOTREQUEST' if op == 1 else 'BOOTREPLY'})
