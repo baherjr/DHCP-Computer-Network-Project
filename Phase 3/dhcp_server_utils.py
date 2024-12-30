@@ -6,7 +6,7 @@ from IPManager import IPManager
 # Server Configuration
 SERVER_PORT = 67  # Port for the DHCP server
 CLIENT_PORT = 68  # Port for the DHCP client
-BROADCAST_ADDRESS = "192.168..255"  # Corrected broadcast address
+BROADCAST_ADDRESS = "192.168.1.255"  # Corrected broadcast address
 
 # Error Codes
 ERROR_CODES = {
@@ -281,6 +281,7 @@ def send_dhcp_offer(parsed_packet, server_socket, client_address, ip_manager):
 
         # Get the next available IP address from IPManager
         offered_ip = ip_manager.get_next_available_ip(client_mac)
+        ip_manager.set_current_ip(offered_ip)
 
         if not offered_ip:
             print(f"[WARNING] No IP available for MAC {client_mac}. Cannot send DHCPOFFER.")
@@ -308,17 +309,24 @@ def send_dhcp_offer(parsed_packet, server_socket, client_address, ip_manager):
         print(f"[ERROR] Failed to send DHCPOFFER: {e}")
 
 
-def send_dhcp_ack(parsed_packet, server_socket, client_address):
+def send_dhcp_ack(parsed_packet, server_socket, client_address, ip_manager):
     """Send a DHCPACK response to the client."""
+    client_mac = parsed_packet["chaddr"]
+    print(f"[INFO] Processing DHCPREQUEST for MAC: {client_mac}")
+
     response_packet = construct_dhcp_packet(
         transaction_id=parsed_packet["xid"],
-        yiaddr="192.168.100.6",  # Example assigned IP address
-        siaddr="192.168.100.1",  # DHCP server address
+        yiaddr=ip_manager.get_current_ip(),  # Offered IP address
+        ip_manager=ip_manager,
         dhcp_message_type=5,  # DHCPACK
+        client_mac=client_mac  # MAC string will be converted to bytes in construct_dhcp_packet
     )
+   
+    print_dhcp_packet(response_packet)
+
     # Send the response directly to the client's address
-    server_socket.sendto(response_packet, client_address)
-    print(f"DHCPACK sent to {client_address} confirming IP 192.168.1.100")
+    server_socket.sendto(response_packet, (BROADCAST_ADDRESS,CLIENT_PORT))
+    print(f"DHCPACK sent to {client_address} confirming IP {ip_manager.get_current_ip()}")
 
 
 def mac_str_to_bytes(mac_str):

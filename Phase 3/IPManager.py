@@ -16,11 +16,18 @@ class IPManager:
         self.config_path = config_path
         self.config_lock = threading.Lock()
         self.active_leases = {}  # {ip: {'mac': mac, 'expires': timestamp}}
+        self.currentIP = "0.0.0.0"  # Initialize currentIP to 0.0.0.0
         self.load_config()
         
         # Start configuration monitoring thread
         self.monitor_thread = threading.Thread(target=self._monitor_config, daemon=True)
         self.monitor_thread.start()
+
+    def get_current_ip(self):
+            return self.currentIP
+
+    def set_current_ip(self, ip):
+            self.currentIP = ip
 
     def load_config(self):
         """Load or reload the configuration file."""
