@@ -93,29 +93,36 @@ class IPManager:
     def get_next_available_ip(self, mac_address):
         """
         Get the next available IP address from the pool.
-        
+
         Args:
             mac_address: Client's MAC address
-            
+
         Returns:
             str: Next available IP address or None if none available
         """
         try:
             # Check if MAC is blocked
-            if self.is_mac_blocked(mac_address):
-                print(f"[INFO] MAC address {mac_address} is blocked")
-                return None
+            def is_mac_blocked(self, mac):
+                """Check if a MAC address is blocked and optionally log the reason and block date."""
+                mac = mac.lower()
+                for blocked in self.config['ip_pool']['blocked']:
+                    if blocked['mac'].lower() == mac:
+                        reason = blocked.get('reason', 'No reason provided')
+                        block_date = blocked.get('block_date', 'Unknown date')
+                        print(f"[INFO] MAC {mac} is blocked. Reason: {reason}, Block Date: {block_date}")
+                        return True
+                return False
 
-            # Check for existing reservation
+            # Existing reservation logic
             for reserved in self.config['ip_pool']['reserved']:
                 if reserved['mac'].lower() == mac_address.lower():
                     return reserved['ip']
 
-            # Check each IP pool range
+            # IP pool allocation logic
             for range_config in self.config['ip_pool']['ranges']:
                 start_ip = ipaddress.IPv4Address(range_config['start'])
                 end_ip = ipaddress.IPv4Address(range_config['end'])
-                
+
                 current_ip = start_ip
                 while current_ip <= end_ip:
                     if self.is_ip_available(current_ip):
