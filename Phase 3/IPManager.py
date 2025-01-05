@@ -23,6 +23,46 @@ class IPManager:
         self.monitor_thread = threading.Thread(target=self._monitor_config, daemon=True)
         self.monitor_thread.start()
 
+    def get_broadcast_address(self):
+        with self.config_lock:
+            return self.config['network']['broadcast_address']
+    
+    def get_client_port(self):
+        with self.config_lock:
+            return self.config['server']['client_port']
+        
+    def get_listening_port(self):
+        with self.config_lock:
+            return self.config['server']['listening_port']
+    
+    def get_server_ip(self):
+        with self.config_lock:
+            return self.config['server']['server_ip']
+
+    def get_subnet_mask(self):
+        with self.config_lock:
+            return self.config['network']['subnet_mask']
+
+    def get_dns_servers(self):
+        with self.config_lock:
+            return self.config['network']['dns_servers']
+
+    def get_router(self):
+        with self.config_lock:
+            return self.config['network']['router']
+
+    def get_lease_time(self):
+        with self.config_lock:
+            return self.config['lease_settings']['default_lease_time']
+        
+    def get_renewal_time(self):
+        with self.config_lock:
+            return self.config['lease_settings']['renewal_time']
+    
+    def get_rebinding_time(self):
+        with self.config_lock:
+            return self.config['lease_settings']['rebinding_time']
+    
     def get_current_ip(self):
             return self.currentIP
 
@@ -136,6 +176,7 @@ class IPManager:
                 'mac': mac,
                 'expires': time.time() + lease_time
             }
+        print(self.active_leases[ip])
 
     def remove_lease(self, ip):
         """Remove a lease."""
