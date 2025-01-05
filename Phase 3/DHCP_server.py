@@ -135,11 +135,50 @@ def parse_dhcp_packet(data):
                     break
 
                 value = data[i + 2:i + 2 + length]
+                
+                # Decode the option based on its type
+                option_str = f"[DEBUG] Parsed Option: {option_type}, Length: {length}, Value: "
+                if option_type == 50:  # Requested IP Address
+                    option_str += f"Requested IP Address = {socket.inet_ntoa(value)}"
+                elif option_type == 60:  # Vendor Class Identifier
+                    option_str += f"Vendor Class Identifier = {value.decode('ascii')}"
+                elif option_type == 12:  # Host Name
+                    option_str += f"Host Name = {value.decode('ascii')}"
+                elif option_type == 53:  # DHCP Message Type
+                    msg_types = {
+                        1: "DHCPDISCOVER",
+                        2: "DHCPOFFER",
+                        3: "DHCPREQUEST",
+                        4: "DHCPDECLINE",
+                        5: "DHCPACK",
+                        6: "DHCPNAK",
+                        7: "DHCPRELEASE",
+                        8: "DHCPINFORM"
+                    }
+                    option_str += f"DHCP Message Type = {msg_types.get(value[0], 'Unknown')}"
+                elif option_type == 1:  # Subnet Mask
+                    option_str += f"Subnet Mask = {socket.inet_ntoa(value)}"
+                elif option_type == 3:  # Router
+                    option_str += f"Router = {socket.inet_ntoa(value)}"
+                elif option_type == 6:  # DNS Servers
+                    dns_servers = [socket.inet_ntoa(value[i:i+4]) for i in range(0, len(value), 4)]
+                    option_str += f"DNS Servers = {', '.join(dns_servers)}"
+                elif option_type == 51:  # Lease Time
+                    lease_time = int.from_bytes(value, 'big')
+                    option_str += f"Lease Time = {lease_time} seconds"
+                elif option_type == 54:  # DHCP Server Identifier
+                    option_str += f"DHCP Server = {socket.inet_ntoa(value)}"
+                elif option_type == 58:  # Renewal Time
+                    renewal_time = int.from_bytes(value, 'big')
+                    option_str += f"Renewal Time = {renewal_time} seconds"
+                elif option_type == 59:  # Rebinding Time
+                    rebinding_time = int.from_bytes(value, 'big')
+                    option_str += f"Rebinding Time = {rebinding_time} seconds"
+                else:
+                    option_str += f"Raw Data = {binascii.hexlify(value).decode()}"
+
+                print(option_str)
                 options.append({"type": option_type, "length": length, "value": value})
-                
-                # Debug output for option
-                print(f"[DEBUG] Parsed Option: {option_type}, Length: {length}, Value: {binascii.hexlify(value).decode()}")
-                
                 i += 2 + length
 
         dhcp_packet["options"] = options
@@ -316,7 +355,7 @@ def handle_dhcp_message(packet, server_socket, client_address, ip_manager, BROAD
 
         elif dhcp_message_type == 3:  # DHCPREQUEST
             print(f"[INFO] DHCPREQUEST received from {client_address}")
-            send_dhcp_ack(parsed_packet, server_socket, client_address, ip_manager, BROADCAST_ADDRESS, CLIENT_PORT)
+            handle_dhcp_request(parsed_packet, server_socket, client_address, ip_manager, BROADCAST_ADDRESS, CLIENT_PORT)
 
         elif dhcp_message_type == 7:  # DHCPRELEASE
             print(f"[INFO] DHCPRELEASE received from {client_address}")
@@ -402,6 +441,58 @@ def send_dhcp_ack(parsed_packet, server_socket, client_address, ip_manager, BROA
     lease_time = ip_manager.config['lease_settings']['default_lease_time']
     ip_manager.add_lease(ip_manager.get_current_ip(), client_mac, lease_time)
     print(f"DHCPACK sent to {client_address} confirming IP {ip_manager.get_current_ip()}")
+
+def send_dhcp_nak(parsed_packet, server_socket, client_address, ip_manager, BROADCAST_ADDRESS, CLIENT_PORT):
+    """Send a DHCPNAK response to the client."""
+    try:
+        client_mac = parsed_packet["chaddr"]
+
+        # Construct the DHCPNAK packet
+        response_packet = construct_dhcp_packet(
+            transaction_id=parsed_packet["xid"],
+            yiaddr="0.0.0.0",  # NAK does not assign an IP
+            ip_manager=ip_manager,
+            dhcp_message_type=6,  # DHCPNAK
+            client_mac=client_mac
+        )
+
+        # Send the response directly to the client's address
+        server_socket.sendto(response_packet, (BROADCAST_ADDRESS, CLIENT_PORT))
+        print(f"[INFO] DHCPNAK sent to {client_address} for MAC {client_mac}")
+
+    except Exception as e:
+        print(f"[ERROR] Failed to send DHCPNAK: {e}")
+
+def handle_dhcp_request(parsed_packet, server_socket, client_address, ip_manager, BROADCAST_ADDRESS, CLIENT_PORT):
+    """Handle a DHCPREQUEST message by sending either DHCPACK or DHCPNAK."""
+    try:
+        client_mac = parsed_packet["chaddr"]
+        requested_ip = None
+
+        # Extract the requested IP from the DHCP options (if present)
+        for option in parsed_packet["options"]:
+            if option["type"] == 50:  # Requested IP Address option
+                requested_ip = socket.inet_ntoa(option["value"])
+                break
+
+        # If no requested IP is found, use the ciaddr field
+        if not requested_ip:
+            requested_ip = socket.inet_ntoa(parsed_packet["ciaddr"])
+
+        print(f"[INFO] DHCPREQUEST received from {client_address} for IP {requested_ip}")
+
+        # Check if the requested IP is available
+        if ip_manager.is_ip_available(requested_ip):
+            # If the IP is available, send DHCPACK
+            print(f"[INFO] IP {requested_ip} is available. Sending DHCPACK.")
+            send_dhcp_ack(parsed_packet, server_socket, client_address, ip_manager, BROADCAST_ADDRESS, CLIENT_PORT)
+        else:
+            # If the IP is not available, send DHCPNAK
+            print(f"[INFO] IP {requested_ip} is not available. Sending DHCPNAK.")
+            send_dhcp_nak(parsed_packet, server_socket, client_address, ip_manager, BROADCAST_ADDRESS, CLIENT_PORT)
+
+    except Exception as e:
+        print(f"[ERROR] Failed to handle DHCPREQUEST: {e}")
 
 def handle_dhcp_release(parsed_packet, ip_manager):
     """Handle a DHCPRELEASE message by releasing the IP address."""
