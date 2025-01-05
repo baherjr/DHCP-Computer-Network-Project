@@ -6,7 +6,7 @@ from IPManager import IPManager
 # Server Configuration
 SERVER_PORT = 67  # Port for the DHCP server
 CLIENT_PORT = 68  # Port for the DHCP client
-BROADCAST_ADDRESS = "192.168.1.255"  # Corrected broadcast address
+BROADCAST_ADDRESS = "192.168.100.1"  # Corrected broadcast address
 
 # Error Codes
 ERROR_CODES = {
@@ -152,21 +152,45 @@ def handle_dhcp_message(packet, server_socket, client_address, ip_manager):
     try:
         # Parse the packet
         parsed_packet = parse_dhcp_packet(packet)
-
         if not parsed_packet:
             print("[WARNING] Failed to parse DHCP packet. Ignoring.")
             return
 
-        # Identify the type of DHCP message
+        # Extract the type of DHCP message (from the options field)
         dhcp_message_type = get_dhcp_message_type(parsed_packet["options"])
+        client_mac = parsed_packet["chaddr"]
 
         if dhcp_message_type == 1:  # DHCPDISCOVER
             print(f"[INFO] DHCPDISCOVER received from {client_address}")
+
+            # Blocked MAC Handling
+            if ip_manager.is_mac_blocked(client_mac):
+                print(f"[INFO] Blocked MAC {client_mac}. Sending DHCPNAK...")
+                send_dhcp_nak(parsed_packet, server_socket, client_address, ip_manager)
+                return  # Stop further processing
+
+            # Send DHCPOFFER
             send_dhcp_offer(parsed_packet, server_socket, client_address, ip_manager)
 
         elif dhcp_message_type == 3:  # DHCPREQUEST
             print(f"[INFO] DHCPREQUEST received from {client_address}")
+
+            # Blocked MAC Handling
+            if ip_manager.is_mac_blocked(client_mac):
+                print(f"[INFO] Blocked MAC {client_mac}. Sending DHCPNAK...")
+                send_dhcp_nak(parsed_packet, server_socket, client_address, ip_manager)
+                return  # Stop further processing
+
+            # Send DHCPACK
             send_dhcp_ack(parsed_packet, server_socket, client_address, ip_manager)
+
+        elif dhcp_message_type == 4:  # DHCPDECLINE
+            print(f"[INFO] DHCPDECLINE received from {client_address}")
+            handle_dhcp_decline(parsed_packet, ip_manager)
+
+        elif dhcp_message_type == 7:  # DHCPRELEASE
+            print(f"[INFO] DHCPRELEASE received from {client_address}")
+            handle_dhcp_release(parsed_packet, ip_manager)
 
         else:
             print(f"[WARNING] Unsupported DHCP message type: {dhcp_message_type}")
@@ -328,6 +352,66 @@ def send_dhcp_ack(parsed_packet, server_socket, client_address, ip_manager):
     server_socket.sendto(response_packet, (BROADCAST_ADDRESS,CLIENT_PORT))
     print(f"DHCPACK sent to {client_address} confirming IP {ip_manager.get_current_ip()}")
 
+def send_dhcp_nak(parsed_packet, server_socket, client_address, ip_manager):
+    """Send a DHCPNAK response to the client for blocked MAC or other denial reasons."""
+    try:
+        client_mac = parsed_packet["chaddr"]
+        print(f"[INFO] Sending DHCPNAK to MAC: {client_mac}")
+
+        # Construct DHCPNAK
+        response_packet = construct_dhcp_packet(
+            transaction_id=parsed_packet["xid"],
+            yiaddr="0.0.0.0",  # No IP address assigned
+            ip_manager=ip_manager,
+            dhcp_message_type=6,  # DHCPNAK
+            client_mac=client_mac
+        )
+
+        print_dhcp_packet(response_packet)
+
+        # Send the NAK to the client
+        server_socket.sendto(response_packet, (BROADCAST_ADDRESS, CLIENT_PORT))
+        print(f"[INFO] DHCPNAK sent to {client_address}")
+    except Exception as e:
+        print(f"[ERROR] Failed to send DHCPNAK: {e}")
+
+def handle_dhcp_decline(parsed_packet, ip_manager):
+    """Handle DHCPDECLINE: Client declines the offered IP due to conflict."""
+    try:
+        client_mac = parsed_packet["chaddr"]
+        declined_ip = socket.inet_ntoa(parsed_packet["yiaddr"])  # Declined IP address
+
+        print(f"[INFO] DHCPDECLINE received from MAC {client_mac} for IP {declined_ip}")
+
+        # Optional: Mark the declined IP as unavailable (if supported by IPManager)
+        # Log this event or keep track of declined IPs (server-level logic):
+        if not declined_ip:
+            print(f"[ERROR] No IP found in DECLINE to handle.")
+            return
+
+        # Optional: Add declined IP logging or invalidation logic here
+        print(f"[WARNING] {declined_ip} is marked as declined or invalid by client.")
+
+    except Exception as e:
+        print(f"[ERROR] Error processing DHCPDECLINE: {e}")
+
+def handle_dhcp_release(parsed_packet, ip_manager):
+    """Handle DHCPRELEASE: Client releasing a previously leased IP address."""
+    try:
+        client_mac = parsed_packet["chaddr"]
+        released_ip = socket.inet_ntoa(parsed_packet["ciaddr"])  # Released IP address
+
+        print(f"[INFO] DHCPRELEASE received from MAC {client_mac} for IP {released_ip}")
+
+        # Remove the lease from the IPManager
+        if released_ip in ip_manager.active_leases:
+            ip_manager.remove_lease(released_ip)
+            print(f"[INFO] Released IP {released_ip} is now available.")
+        else:
+            print(f"[WARNING] Attempted RELEASE for non-active IP {released_ip}")
+
+    except Exception as e:
+        print(f"[ERROR] Error processing DHCPRELEASE: {e}")
 
 def mac_str_to_bytes(mac_str):
     """Convert a MAC address string to bytes.
@@ -489,7 +573,7 @@ def send_error_response(client_address, server_socket, error_code):
 def main():
     """Main entry point for the server."""
     # Initialize the IPManager with a sample config file path
-    ip_manager = IPManager(config_path="F:/ASU/YEAR 4/Semester 1/CSE351 - Networks/Project/Networks/Phase 3/configs.json")
+    ip_manager = IPManager(config_path="configs.json")
 
     # Create and set up the server socket
     server_socket = create_socket()
