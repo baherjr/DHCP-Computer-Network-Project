@@ -21,6 +21,8 @@ def create_socket(SERVER_PORT):
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+    # server_socket.setblocking(False)
+    #server_socket.settimeout(5.0)  # 5 seconds timeout
 
     # Bind to all interfaces on the desired port
     server_socket.bind(("0.0.0.0", SERVER_PORT))
@@ -466,14 +468,31 @@ def send_dhcp_nak(parsed_packet, server_socket, client_address, ip_manager, BROA
 def handle_dhcp_request(parsed_packet, server_socket, client_address, ip_manager, BROADCAST_ADDRESS, CLIENT_PORT):
     """Handle a DHCPREQUEST message by sending either DHCPACK or DHCPNAK."""
     try:
+        def normalize_mac(mac):
+            # Remove any separators and convert to lowercase
+            mac_clean = mac.replace(':', '').replace('-', '').lower()
+            # Reformat to colon-separated format
+            return ':'.join(mac_clean[i:i+2] for i in range(0, 12, 2))
+        
+        def check_mac_equivalence(mac1,mac2):
+            normalize_mac(mac1)
+            normalize_mac(mac2)
+            return mac1 == mac2
+        
         client_mac = parsed_packet["chaddr"]
-        requested_ip = None
+        # Define the MAC address to check against
+        TARGET_MAC = "88:52:eb:9f:71:92" # Redmi note 11's MAC address
+        requested_ip = "10.0.1.14" # Outsider IP since our subnet range is 192.168.1.0/24 
 
-        # Extract the requested IP from the DHCP options (if present)
-        for option in parsed_packet["options"]:
-            if option["type"] == 50:  # Requested IP Address option
-                requested_ip = socket.inet_ntoa(option["value"])
-                break
+        # Check if the client's MAC address matches the target value
+        if not check_mac_equivalence(client_mac,TARGET_MAC):
+            requested_ip = None 
+
+            # Extract the requested IP from the DHCP options (if present)
+            for option in parsed_packet["options"]:
+                if option["type"] == 50:  # Requested IP Address option
+                    requested_ip = socket.inet_ntoa(option["value"])
+                    break
 
         # If no requested IP is found, use the ciaddr field
         if not requested_ip:
@@ -482,7 +501,7 @@ def handle_dhcp_request(parsed_packet, server_socket, client_address, ip_manager
         print(f"[INFO] DHCPREQUEST received from {client_address} for IP {requested_ip}")
 
         # Check if the requested IP is available
-        if ip_manager.is_ip_available(requested_ip):
+        if ip_manager.is_ip_available(requested_ip) and not ip_manager.is_mac_blocked(client_mac):
             # If the IP is available, send DHCPACK
             print(f"[INFO] IP {requested_ip} is available. Sending DHCPACK.")
             send_dhcp_ack(parsed_packet, server_socket, client_address, ip_manager, BROADCAST_ADDRESS, CLIENT_PORT)
@@ -637,7 +656,7 @@ def lease_cleanup_task(ip_manager):
     while True:
         try:
             ip_manager.cleanup_expired_leases()
-            time.sleep(3600)  # Run cleanup every hour (3600 seconds)
+            time.sleep(5)  # Run cleanup every hour (3600 seconds)
         except Exception as e:
             print(f"[ERROR] Lease cleanup task failed: {e}")
             time.sleep(60)  # Wait a minute before retrying if an error occurs

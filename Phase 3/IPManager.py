@@ -109,6 +109,26 @@ class IPManager:
         """Check if an IP address is available for assignment."""
         ip_str = str(ip)
         
+        try:
+            ip_obj = ipaddress.IPv4Address(ip_str)
+        except ipaddress.AddressValueError:
+            print(f"[ERROR] Invalid IP address: {ip_str}")
+            return False
+
+        # Check if the IP lies within the configured range
+        in_range = False
+        for range_config in self.config['ip_pool']['ranges']:
+            start_ip = ipaddress.IPv4Address(range_config['start'])
+            end_ip = ipaddress.IPv4Address(range_config['end'])
+            
+            if start_ip <= ip_obj <= end_ip:
+                in_range = True
+                break
+
+        if not in_range:
+            print(f"[INFO] IP {ip_str} is outside the configured range.")
+            return False
+
         # Check if IP is in reserved list
         for reserved in self.config['ip_pool']['reserved']:
             if reserved['ip'] == ip_str:
